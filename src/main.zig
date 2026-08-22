@@ -59,6 +59,7 @@ const App = struct {
         ok = self.testBootInfoSnapshot() and ok;
         ok = self.testBootPhasePerformance() and ok;
         ok = self.testFrozenBootCompletion() and ok;
+        ok = self.testBootTaskRetired() and ok;
         ok = self.testBootLogBridge() and ok;
         ok = self.testMemorySnapshot() and ok;
         ok = self.testMemoryPressure() and ok;
@@ -162,6 +163,7 @@ const App = struct {
             self.dev.hasFn("memory_pressure_snapshot") and
             self.dev.hasFn("memory_vm_reserve_probe") and
             self.dev.hasFn("performance_summary") and
+            self.dev.hasFn("performance_task") and
             self.dev.hasFn("performance_boot_phase_clock") and
             self.dev.hasFn("performance_boot_summary") and
             self.sys.base.hasDevFn("memory_summary") and
@@ -338,6 +340,49 @@ const App = struct {
         const ok = rejected == r4os.abi.boot_ready_error_not_boot_shell and same;
         self.printCheck("Frozen boot completion", ok);
         return ok;
+    }
+
+    fn testBootTaskRetired(self: *App) bool {
+        const first = self.findBootTask();
+        if (first) |before| {
+            if (before.state != 4) {
+                self.printCheck("Boot task retired", false);
+                self.printBootTask(before);
+                return false;
+            }
+            self.sys.sleepTicks(2);
+            if (self.findBootTask()) |after| {
+                const stable = after.state == 4 and
+                    after.id == before.id and
+                    after.run_ticks == before.run_ticks and
+                    after.switches_in == before.switches_in;
+                self.printCheck("Boot task retired", stable);
+                self.printBootTask(after);
+                return stable;
+            }
+        }
+        self.printCheck("Boot task retired", true);
+        self.sys.println("  Boot task records=0 state=0 run_ticks=0 switches=0");
+        return true;
+    }
+
+    fn findBootTask(self: *App) ?r4os.abi.ProgramTaskPerformanceInfo {
+        var index: u32 = 0;
+        while (index < 1024) : (index += 1) {
+            const info = self.dev.performanceTask(index) orelse return null;
+            if (tagEquals(info.name[0..], "kernel-main")) return info;
+        }
+        return null;
+    }
+
+    fn printBootTask(self: *App, info: r4os.abi.ProgramTaskPerformanceInfo) void {
+        self.sys.write("  Boot task records=1 state=");
+        self.sys.printU64(info.state);
+        self.sys.write(" run_ticks=");
+        self.sys.printU64(info.run_ticks);
+        self.sys.write(" switches=");
+        self.sys.printU64(info.switches_in);
+        self.sys.println("");
     }
 
     fn testBootLogBridge(self: *App) bool {

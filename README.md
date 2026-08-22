@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.3.0`
+- Version: `0.3.1`
 - Image target: `/R4OS/SOFTWARE/TERMINAL/DIAG/BOOTDIAG.R4X`
 - Image scope: `test`
 - Canonical project manifest: `module.R4MF`
@@ -30,7 +30,9 @@ mapped local checkouts.
 At runtime, the default `/BASELINE` mode reads only the small passive boot
 summary and phase records. `/CONFORMANCE` explicitly enables the broader,
 state-changing runtime contract tests and verifies that the completed boot
-dataset remains byte-stable across delayed reads.
+dataset remains byte-stable across delayed reads. It also verifies that the
+one-shot `kernel-main` boot task is absent from the runtime task inventory (or
+remains dead and numerically unchanged until its deferred reap completes).
 
 ## Documentation
 
