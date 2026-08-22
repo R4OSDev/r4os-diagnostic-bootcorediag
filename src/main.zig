@@ -17,6 +17,7 @@ const App = struct {
         self.sys.println("BOOTDIAG");
         var ok = true;
         ok = self.testApiHeader() and ok;
+        ok = self.testMonotonicClock() and ok;
         ok = self.testBootInfoSnapshot() and ok;
         ok = self.testBootPhasePerformance() and ok;
         ok = self.testBootLogBridge() and ok;
@@ -40,7 +41,9 @@ const App = struct {
             self.dev.hasFn("memory_pressure_snapshot") and
             self.dev.hasFn("memory_vm_reserve_probe") and
             self.dev.hasFn("performance_summary") and
+            self.dev.hasFn("performance_boot_phase_clock") and
             self.sys.base.hasDevFn("memory_summary") and
+            self.sys.hasFn("monotonic_clock") and
             self.sys.hasFn("vm_reserve") and
             self.dev.hasFn("boot_info_summary") and
             self.sys.hasFn("boot_log_info");
@@ -54,24 +57,85 @@ const App = struct {
         return true;
     }
 
+    fn testMonotonicClock(self: *App) bool {
+        var first: r4os.abi.MonotonicClockInfo = .{};
+        var second: r4os.abi.MonotonicClockInfo = .{};
+        const first_rc = self.sys.monotonicClock(&first);
+        const second_rc = self.sys.monotonicClock(&second);
+        const required_flags = r4os.abi.monotonic_clock_flag_valid |
+            r4os.abi.monotonic_clock_flag_continuous;
+        const ok = first_rc > 0 and second_rc > 0 and
+            first.version == 1 and
+            first.size >= @sizeOf(r4os.abi.MonotonicClockInfo) and
+            (first.flags & required_flags) == required_flags and
+            first.source != r4os.abi.monotonic_clock_source_unavailable and
+            first.frequency_hz == r4os.abi.monotonic_clock_frequency_hz and
+            first.resolution_ns > 0 and
+            first.event_frequency_numerator > 0 and
+            first.event_frequency_denominator > 0 and
+            second.generation == first.generation and
+            second.instant_ns >= first.instant_ns;
+        self.printCheck("Monotonic clock", ok);
+        if (!ok) return false;
+        self.sys.write("  Clock source=");
+        self.sys.printU64(first.source);
+        self.sys.write(" generation=");
+        self.sys.printU64(first.generation);
+        self.sys.write(" resolution-ns=");
+        self.sys.printU64(first.resolution_ns);
+        self.sys.write(" event-rate=");
+        self.sys.printU64(first.event_frequency_numerator);
+        self.sys.write("/");
+        self.sys.printU64(first.event_frequency_denominator);
+        self.sys.println("");
+        return true;
+    }
+
     fn testBootPhasePerformance(self: *App) bool {
         const summary = self.dev.performanceSummary() orelse return self.failBool("Boot performance summary unavailable");
         var saw_loader = false;
         var saw_runtime = false;
         var saw_shell = false;
         var checked: u32 = 0;
+        var timed: u32 = 0;
+        var unavailable: u32 = 0;
+        var timing_shape_ok = true;
         var i: u32 = 0;
         while (i < summary.boot_phase_count) : (i += 1) {
             const phase = self.dev.performanceBootPhase(i) orelse return self.failBool("Boot phase performance entry unavailable");
+            const clock = self.dev.performanceBootPhaseClock(i) orelse return self.failBool("Boot phase clock entry unavailable");
             checked += 1;
             if (phase.phase == 10) saw_loader = true;
             if (phase.phase == 13) saw_runtime = true;
             if (phase.phase == 18) saw_shell = true;
+            const clock_valid = (clock.clock_flags & r4os.abi.monotonic_clock_flag_valid) != 0;
+            if (clock_valid) {
+                timed += 1;
+                timing_shape_ok = timing_shape_ok and clock.last_ns >= clock.first_ns;
+            } else {
+                unavailable += 1;
+                timing_shape_ok = timing_shape_ok and clock.unavailable_spans > 0;
+            }
+            timing_shape_ok = timing_shape_ok and
+                clock.version == 1 and
+                clock.size >= @sizeOf(r4os.abi.ProgramBootPhaseClockInfo) and
+                clock.index == i and
+                clock.phase == phase.phase and
+                clock.transitions == phase.transitions;
         }
+        const boot_timing_ok = (summary.boot_timing_valid != 0 and summary.boot_total_ns > 0) or
+            (summary.boot_timing_valid == 0 and summary.boot_timing_unavailable_spans > 0);
         const ok = (summary.flags & r4os.abi.performance_flag_boot_perf_ready) != 0 and
+            summary.version == r4os.abi.performance_snapshot_version and
+            summary.version >= 2 and
             summary.boot_phase_count > 0 and
             summary.boot_transition_count >= summary.boot_phase_count and
             checked == summary.boot_phase_count and
+            timed + unavailable == checked and
+            timed > 0 and
+            timing_shape_ok and
+            boot_timing_ok and
+            summary.boot_timing_dropped_spans == 0 and
             saw_loader and saw_runtime and saw_shell;
         self.printCheck("Boot phase performance", ok);
         if (!ok) return false;
@@ -81,6 +145,16 @@ const App = struct {
         self.sys.printU64(summary.boot_transition_count);
         self.sys.write(" ticks=");
         self.sys.printU64(summary.boot_total_ticks);
+        self.sys.write(" ns=");
+        if (summary.boot_timing_valid != 0) {
+            self.sys.printU64(summary.boot_total_ns);
+        } else {
+            self.sys.write("unavailable");
+        }
+        self.sys.write(" timed/unavailable=");
+        self.sys.printU64(timed);
+        self.sys.write("/");
+        self.sys.printU64(unavailable);
         self.sys.println("");
         return true;
     }

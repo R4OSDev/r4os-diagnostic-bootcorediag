@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.1`
+- Version: `0.2.0`
 - Image target: `/R4OS/SOFTWARE/TERMINAL/DIAG/BOOTDIAG.R4X`
 - Image scope: `test`
 - Canonical project manifest: `module.R4MF`
@@ -26,6 +26,11 @@ The build starters resolve the current local R4OS dependency checkouts through
 `Settings.R4S`. The URL and hash entries in `build.zig.zon` record the
 last verified standalone dependency identities; workspace builds use the
 mapped local checkouts.
+
+At runtime, BOOTDIAG validates the optional R4SYS monotonic-clock contract and
+the R4DEV boot-phase clock records. It accepts either resolved nanosecond spans
+or an explicit unavailable count for early history that the selected hardware
+clock cannot calibrate.
 
 ## Documentation
 

@@ -4,9 +4,13 @@
 BOOTDIAG prueft den aktuellen Bootkern ueber R4SYS- und R4DEV-Contexts:
 
 - R4XStart-/Gruppenvertrag
+- backendstabile monotone R4SYS-Uhr samt Quelle, Aufloesung und Ereignisrate
 - BootInfo- und Bootlog-Sicht
-- Bootphasen- und Loader-Performancewerte
+- Bootphasen-Nanosekunden oder explizit nicht aufloesbare Spannen sowie
+  Loader-Performancewerte
 - Plattform-, Speicher-, Storage- und Modulgrundzustand
 
 Optionale Diagnosefelder werden mit hasFn geprueft. Der Smoke erwartet
-BOOTDIAG result: OK.
+BOOTDIAG result: OK. Ein Zeitinstant von null am Beginn der Clockepoche ist
+gueltig; nur Rueckschritte, inkonsistente Metadaten und weder messbare noch
+explizit als nicht aufloesbar markierte Spannen sind Vertragsfehler.
