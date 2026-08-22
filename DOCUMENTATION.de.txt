@@ -1,7 +1,19 @@
 ﻿BOOTDIAG.R4X
 =============
 
-BOOTDIAG prueft den aktuellen Bootkern ueber R4SYS- und R4DEV-Contexts:
+BOOTDIAG trennt passive Bootmessung und invasive Vertragspruefung:
+
+- `BOOTDIAG` beziehungsweise `BOOTDIAG /BASELINE` liest ausschliesslich den
+  kleinen `ProgramBootPerformanceInfo`-Datensatz und die vorhandenen
+  Bootphasen. Dieser Pfad reserviert, committed, beruehrt und alloziert keinen
+  Testspeicher und ruft weder Yield noch Sleep auf.
+- `BOOTDIAG /CONFORMANCE` fuehrt die bisherigen breiten Runtimeprobes
+  ausdruecklich aus. Zusaetzlich prueft es den abgewiesenen Readiness-Aufruf
+  eines Nicht-Shell-Programms sowie bytegleiche Boot- und Phasendaten nach
+  einer verzoegerten Wiederholungsabfrage.
+
+Der Konformitaetsmodus prueft den aktuellen Bootkern ueber R4SYS- und
+R4DEV-Contexts:
 
 - R4XStart-/Gruppenvertrag
 - backendstabile monotone R4SYS-Uhr samt Quelle, Aufloesung und Ereignisrate

@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.2.0`
+- Version: `0.3.0`
 - Image target: `/R4OS/SOFTWARE/TERMINAL/DIAG/BOOTDIAG.R4X`
 - Image scope: `test`
 - Canonical project manifest: `module.R4MF`
@@ -27,10 +27,10 @@ The build starters resolve the current local R4OS dependency checkouts through
 last verified standalone dependency identities; workspace builds use the
 mapped local checkouts.
 
-At runtime, BOOTDIAG validates the optional R4SYS monotonic-clock contract and
-the R4DEV boot-phase clock records. It accepts either resolved nanosecond spans
-or an explicit unavailable count for early history that the selected hardware
-clock cannot calibrate.
+At runtime, the default `/BASELINE` mode reads only the small passive boot
+summary and phase records. `/CONFORMANCE` explicitly enables the broader,
+state-changing runtime contract tests and verifies that the completed boot
+dataset remains byte-stable across delayed reads.
 
 ## Documentation
 

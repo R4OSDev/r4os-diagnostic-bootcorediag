@@ -1,4 +1,5 @@
 const r4os = @import("r4os");
+const std = @import("std");
 
 var boot_log_buffer: [r4os.abi.boot_log_buffer_size]u8 = .{0xA5} ** r4os.abi.boot_log_buffer_size;
 
@@ -14,12 +15,50 @@ const App = struct {
     }
 
     fn run(self: *App) i32 {
+        const args = zSpan(self.sys.argsRaw());
+        if (equalsIgnoreCase(args, "/?") or equalsIgnoreCase(args, "--HELP")) return self.printHelp();
+        if (equalsIgnoreCase(args, "/CONFORMANCE") or equalsIgnoreCase(args, "--CONFORMANCE"))
+            return self.runConformance();
+        if (args.len == 0 or equalsIgnoreCase(args, "/BASELINE") or equalsIgnoreCase(args, "--BASELINE"))
+            return self.runBaseline();
+        self.sys.println("BOOTDIAG: invalid arguments; use /?");
+        return 2;
+    }
+
+    fn runBaseline(self: *App) i32 {
+        const summary = self.dev.performanceBootSummary() orelse {
+            self.sys.println("BOOTDIAG baseline: boot summary unavailable");
+            return 1;
+        };
+        var ok = validBootSummary(summary);
+        self.printBootRecord(summary, "baseline");
+        var index: u32 = 0;
+        while (index < summary.phase_count) : (index += 1) {
+            const phase = self.dev.performanceBootPhase(index) orelse {
+                ok = false;
+                break;
+            };
+            const clock = self.dev.performanceBootPhaseClock(index) orelse {
+                ok = false;
+                break;
+            };
+            if (phase.phase != clock.phase or phase.transitions != clock.transitions) ok = false;
+            self.printBootPhaseRecord(phase, clock);
+        }
+        if (index != summary.phase_count) ok = false;
+        self.sys.write("BOOTDIAG result: ");
+        self.sys.println(if (ok) "OK" else "FAILED");
+        return if (ok) 0 else 1;
+    }
+
+    fn runConformance(self: *App) i32 {
         self.sys.println("BOOTDIAG");
         var ok = true;
         ok = self.testApiHeader() and ok;
         ok = self.testMonotonicClock() and ok;
         ok = self.testBootInfoSnapshot() and ok;
         ok = self.testBootPhasePerformance() and ok;
+        ok = self.testFrozenBootCompletion() and ok;
         ok = self.testBootLogBridge() and ok;
         ok = self.testMemorySnapshot() and ok;
         ok = self.testMemoryPressure() and ok;
@@ -35,6 +74,88 @@ const App = struct {
         return if (ok) 0 else 1;
     }
 
+    fn printHelp(self: *App) i32 {
+        self.sys.println("BOOTDIAG /BASELINE     passive boot dataset only (default)");
+        self.sys.println("BOOTDIAG /CONFORMANCE  explicit invasive runtime contract checks");
+        return 0;
+    }
+
+    fn printBootRecord(self: *App, summary: r4os.abi.ProgramBootPerformanceInfo, mode: []const u8) void {
+        self.sys.write("BOOTDATA schema=1 mode=");
+        self.sys.write(mode);
+        self.sys.write(" state=");
+        self.sys.printU64(summary.state);
+        self.sys.write(" reason=");
+        self.sys.printU64(summary.completion_reason);
+        self.sys.write(" flags=");
+        self.sys.printU64(summary.flags);
+        self.sys.write(" phase=");
+        self.sys.printU64(summary.current_phase);
+        self.sys.write(" phases=");
+        self.sys.printU64(summary.phase_count);
+        self.sys.write(" transitions=");
+        self.sys.printU64(summary.transition_count);
+        self.sys.write(" start_tick=");
+        self.sys.printU64(summary.boot_start_tick);
+        self.sys.write(" end_tick=");
+        self.sys.printU64(summary.boot_end_tick);
+        self.sys.write(" total_ticks=");
+        self.sys.printU64(summary.total_ticks);
+        self.sys.write(" start_ns=");
+        self.sys.printU64(summary.boot_start_ns);
+        self.sys.write(" end_ns=");
+        self.sys.printU64(summary.boot_end_ns);
+        self.sys.write(" total_ns=");
+        self.sys.printU64(summary.total_ns);
+        self.sys.write(" clock_flags=");
+        self.sys.printU64(summary.clock_flags);
+        self.sys.write(" clock_source=");
+        self.sys.printU64(summary.clock_source);
+        self.sys.write(" clock_generation=");
+        self.sys.printU64(summary.clock_generation);
+        self.sys.write(" resolution_ns=");
+        self.sys.printU64(summary.clock_resolution_ns);
+        self.sys.write(" timing_spans=");
+        self.sys.printU64(summary.timing_span_count);
+        self.sys.write(" unavailable_spans=");
+        self.sys.printU64(summary.timing_unavailable_spans);
+        self.sys.write(" dropped_spans=");
+        self.sys.printU64(summary.timing_dropped_spans);
+        self.sys.write(" configured_attempts=");
+        self.sys.printU64(summary.configured_attempts);
+        self.sys.write(" fallback_attempts=");
+        self.sys.printU64(summary.fallback_attempts);
+        self.sys.write(" launch_failures=");
+        self.sys.printU64(summary.launch_failures);
+        self.sys.write(" shell_instance=");
+        self.sys.printU64(summary.shell_instance_id);
+        self.sys.println("");
+    }
+
+    fn printBootPhaseRecord(self: *App, phase: r4os.abi.ProgramBootPhasePerformanceInfo, clock: r4os.abi.ProgramBootPhaseClockInfo) void {
+        self.sys.write("BOOTPHASE index=");
+        self.sys.printU64(phase.index);
+        self.sys.write(" phase=");
+        self.sys.printU64(phase.phase);
+        self.sys.write(" transitions=");
+        self.sys.printU64(phase.transitions);
+        self.sys.write(" first_tick=");
+        self.sys.printU64(phase.first_tick);
+        self.sys.write(" last_tick=");
+        self.sys.printU64(phase.last_tick);
+        self.sys.write(" total_ticks=");
+        self.sys.printU64(phase.total_ticks);
+        self.sys.write(" first_ns=");
+        self.sys.printU64(clock.first_ns);
+        self.sys.write(" last_ns=");
+        self.sys.printU64(clock.last_ns);
+        self.sys.write(" total_ns=");
+        self.sys.printU64(clock.total_ns);
+        self.sys.write(" unavailable_spans=");
+        self.sys.printU64(clock.unavailable_spans);
+        self.sys.println("");
+    }
+
     fn testApiHeader(self: *App) bool {
         const ok = self.sys.contractValid() and
             self.dev.hasFn("memory_summary") and
@@ -42,8 +163,10 @@ const App = struct {
             self.dev.hasFn("memory_vm_reserve_probe") and
             self.dev.hasFn("performance_summary") and
             self.dev.hasFn("performance_boot_phase_clock") and
+            self.dev.hasFn("performance_boot_summary") and
             self.sys.base.hasDevFn("memory_summary") and
             self.sys.hasFn("monotonic_clock") and
+            self.sys.hasFn("boot_ready") and
             self.sys.hasFn("vm_reserve") and
             self.dev.hasFn("boot_info_summary") and
             self.sys.hasFn("boot_log_info");
@@ -92,22 +215,42 @@ const App = struct {
     }
 
     fn testBootPhasePerformance(self: *App) bool {
-        const summary = self.dev.performanceSummary() orelse return self.failBool("Boot performance summary unavailable");
+        const summary = self.dev.performanceBootSummary() orelse return self.failBool("Boot performance summary unavailable");
         var saw_loader = false;
-        var saw_runtime = false;
-        var saw_shell = false;
+        var task_runtime_index: u32 = std.math.maxInt(u32);
+        var driver_policy_index: u32 = std.math.maxInt(u32);
+        var runtime_index: u32 = std.math.maxInt(u32);
+        var shell_index: u32 = std.math.maxInt(u32);
+        var task_runtime_transitions: u32 = 0;
+        var driver_policy_transitions: u32 = 0;
+        var runtime_transitions: u32 = 0;
+        var shell_transitions: u32 = 0;
         var checked: u32 = 0;
         var timed: u32 = 0;
         var unavailable: u32 = 0;
         var timing_shape_ok = true;
         var i: u32 = 0;
-        while (i < summary.boot_phase_count) : (i += 1) {
+        while (i < summary.phase_count) : (i += 1) {
             const phase = self.dev.performanceBootPhase(i) orelse return self.failBool("Boot phase performance entry unavailable");
             const clock = self.dev.performanceBootPhaseClock(i) orelse return self.failBool("Boot phase clock entry unavailable");
             checked += 1;
             if (phase.phase == 10) saw_loader = true;
-            if (phase.phase == 13) saw_runtime = true;
-            if (phase.phase == 18) saw_shell = true;
+            if (phase.phase == 19) {
+                task_runtime_index = i;
+                task_runtime_transitions = phase.transitions;
+            }
+            if (phase.phase == 17) {
+                driver_policy_index = i;
+                driver_policy_transitions = phase.transitions;
+            }
+            if (phase.phase == 13) {
+                runtime_index = i;
+                runtime_transitions = phase.transitions;
+            }
+            if (phase.phase == 18) {
+                shell_index = i;
+                shell_transitions = phase.transitions;
+            }
             const clock_valid = (clock.clock_flags & r4os.abi.monotonic_clock_flag_valid) != 0;
             if (clock_valid) {
                 timed += 1;
@@ -123,31 +266,38 @@ const App = struct {
                 clock.phase == phase.phase and
                 clock.transitions == phase.transitions;
         }
-        const boot_timing_ok = (summary.boot_timing_valid != 0 and summary.boot_total_ns > 0) or
-            (summary.boot_timing_valid == 0 and summary.boot_timing_unavailable_spans > 0);
-        const ok = (summary.flags & r4os.abi.performance_flag_boot_perf_ready) != 0 and
-            summary.version == r4os.abi.performance_snapshot_version and
-            summary.version >= 2 and
-            summary.boot_phase_count > 0 and
-            summary.boot_transition_count >= summary.boot_phase_count and
-            checked == summary.boot_phase_count and
+        const boot_timing_ok = ((summary.flags & r4os.abi.boot_performance_flag_timing_valid) != 0 and summary.total_ns > 0) or
+            ((summary.flags & r4os.abi.boot_performance_flag_timing_valid) == 0 and summary.timing_unavailable_spans > 0);
+        const order_ok = task_runtime_index < driver_policy_index and
+            driver_policy_index < runtime_index and runtime_index < shell_index and
+            task_runtime_transitions > 0 and driver_policy_transitions > 0 and
+            runtime_transitions == 1 and shell_transitions == 1;
+        const ready_state = summary.state == r4os.abi.boot_performance_state_ready or
+            summary.state == r4os.abi.boot_performance_state_fallback_ready;
+        const ok = validBootSummary(summary) and ready_state and
+            (summary.flags & (r4os.abi.boot_performance_flag_ready | r4os.abi.boot_performance_flag_frozen)) ==
+                (r4os.abi.boot_performance_flag_ready | r4os.abi.boot_performance_flag_frozen) and
+            summary.current_phase == 18 and
+            summary.phase_count > 0 and
+            summary.transition_count >= summary.phase_count and
+            checked == summary.phase_count and
             timed + unavailable == checked and
             timed > 0 and
             timing_shape_ok and
             boot_timing_ok and
-            summary.boot_timing_dropped_spans == 0 and
-            saw_loader and saw_runtime and saw_shell;
+            summary.timing_dropped_spans == 0 and
+            saw_loader and order_ok;
         self.printCheck("Boot phase performance", ok);
         if (!ok) return false;
         self.sys.write("  Boot phases=");
-        self.sys.printU64(summary.boot_phase_count);
+        self.sys.printU64(summary.phase_count);
         self.sys.write(" transitions=");
-        self.sys.printU64(summary.boot_transition_count);
+        self.sys.printU64(summary.transition_count);
         self.sys.write(" ticks=");
-        self.sys.printU64(summary.boot_total_ticks);
+        self.sys.printU64(summary.total_ticks);
         self.sys.write(" ns=");
-        if (summary.boot_timing_valid != 0) {
-            self.sys.printU64(summary.boot_total_ns);
+        if ((summary.flags & r4os.abi.boot_performance_flag_timing_valid) != 0) {
+            self.sys.printU64(summary.total_ns);
         } else {
             self.sys.write("unavailable");
         }
@@ -157,6 +307,37 @@ const App = struct {
         self.sys.printU64(unavailable);
         self.sys.println("");
         return true;
+    }
+
+    fn testFrozenBootCompletion(self: *App) bool {
+        const Phase = r4os.abi.ProgramBootPhasePerformanceInfo;
+        const Clock = r4os.abi.ProgramBootPhaseClockInfo;
+        var phases: [32]Phase = .{Phase{}} ** 32;
+        var clocks: [32]Clock = .{Clock{}} ** 32;
+        const first = self.dev.performanceBootSummary() orelse return self.failBool("Frozen boot summary unavailable");
+        if (first.phase_count > phases.len) return self.failBool("Frozen boot phase history too large");
+        var index: u32 = 0;
+        while (index < first.phase_count) : (index += 1) {
+            phases[index] = self.dev.performanceBootPhase(index) orelse return self.failBool("Frozen boot phase unavailable");
+            clocks[index] = self.dev.performanceBootPhaseClock(index) orelse return self.failBool("Frozen boot phase clock unavailable");
+        }
+
+        const rejected = self.sys.bootReady();
+        const after_rejected = self.dev.performanceBootSummary() orelse return self.failBool("Boot summary after rejected readiness unavailable");
+        self.sys.sleepTicks(2);
+        const delayed = self.dev.performanceBootSummary() orelse return self.failBool("Delayed boot summary unavailable");
+        var same = std.mem.eql(u8, std.mem.asBytes(&first), std.mem.asBytes(&after_rejected)) and
+            std.mem.eql(u8, std.mem.asBytes(&first), std.mem.asBytes(&delayed));
+        index = 0;
+        while (index < first.phase_count) : (index += 1) {
+            const phase = self.dev.performanceBootPhase(index) orelse return self.failBool("Delayed boot phase unavailable");
+            const clock = self.dev.performanceBootPhaseClock(index) orelse return self.failBool("Delayed boot phase clock unavailable");
+            same = std.mem.eql(u8, std.mem.asBytes(&phases[index]), std.mem.asBytes(&phase)) and same;
+            same = std.mem.eql(u8, std.mem.asBytes(&clocks[index]), std.mem.asBytes(&clock)) and same;
+        }
+        const ok = rejected == r4os.abi.boot_ready_error_not_boot_shell and same;
+        self.printCheck("Frozen boot completion", ok);
+        return ok;
     }
 
     fn testBootLogBridge(self: *App) bool {
@@ -646,6 +827,69 @@ fn touchSparse(mem: [*]u8, len: u64, seed: u8) bool {
 
 fn physicalDrop(before: u64, after: u64) u64 {
     return if (before > after) before - after else 0;
+}
+
+fn validBootSummary(summary: r4os.abi.ProgramBootPerformanceInfo) bool {
+    if (summary.version != r4os.abi.boot_performance_version or
+        summary.size < @sizeOf(r4os.abi.ProgramBootPerformanceInfo) or
+        (summary.flags & r4os.abi.boot_performance_flag_initialized) == 0 or
+        summary.phase_count == 0 or summary.phase_count > 32 or
+        summary.boot_end_tick < summary.boot_start_tick or
+        summary.total_ticks != summary.boot_end_tick - summary.boot_start_tick)
+    {
+        return false;
+    }
+    const timing_valid = (summary.flags & r4os.abi.boot_performance_flag_timing_valid) != 0;
+    if (timing_valid and
+        (summary.boot_end_ns < summary.boot_start_ns or summary.total_ns != summary.boot_end_ns - summary.boot_start_ns))
+    {
+        return false;
+    }
+    const terminal_mask = r4os.abi.boot_performance_flag_completed | r4os.abi.boot_performance_flag_frozen;
+    return switch (summary.state) {
+        r4os.abi.boot_performance_state_running =>
+            summary.completion_reason == r4os.abi.boot_completion_reason_none and
+            (summary.flags & terminal_mask) == 0,
+        r4os.abi.boot_performance_state_ready =>
+            summary.completion_reason == r4os.abi.boot_completion_reason_configured_shell_ready and
+            summary.shell_instance_id != 0 and
+            (summary.flags & (terminal_mask | r4os.abi.boot_performance_flag_ready)) ==
+                (terminal_mask | r4os.abi.boot_performance_flag_ready) and
+            (summary.flags & (r4os.abi.boot_performance_flag_fallback | r4os.abi.boot_performance_flag_failed)) == 0,
+        r4os.abi.boot_performance_state_fallback_ready =>
+            (summary.completion_reason == r4os.abi.boot_completion_reason_terminal_fallback_ready or
+                summary.completion_reason == r4os.abi.boot_completion_reason_recovery_fallback_ready) and
+            summary.shell_instance_id != 0 and
+            (summary.flags & (terminal_mask | r4os.abi.boot_performance_flag_ready | r4os.abi.boot_performance_flag_fallback)) ==
+                (terminal_mask | r4os.abi.boot_performance_flag_ready | r4os.abi.boot_performance_flag_fallback) and
+            (summary.flags & r4os.abi.boot_performance_flag_failed) == 0,
+        r4os.abi.boot_performance_state_failed =>
+            (summary.completion_reason == r4os.abi.boot_completion_reason_no_shell or
+                summary.completion_reason == r4os.abi.boot_completion_reason_fatal_error or
+                summary.completion_reason == r4os.abi.boot_completion_reason_shell_exited_before_ready) and
+            (summary.flags & (terminal_mask | r4os.abi.boot_performance_flag_failed)) ==
+                (terminal_mask | r4os.abi.boot_performance_flag_failed) and
+            (summary.flags & (r4os.abi.boot_performance_flag_ready | r4os.abi.boot_performance_flag_fallback)) == 0,
+        else => false,
+    };
+}
+
+fn zSpan(value: [*:0]const u8) []const u8 {
+    var len: usize = 0;
+    while (value[len] != 0) : (len += 1) {}
+    return value[0..len];
+}
+
+fn equalsIgnoreCase(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |left, right| {
+        if (asciiUpper(left) != asciiUpper(right)) return false;
+    }
+    return true;
+}
+
+fn asciiUpper(value: u8) u8 {
+    return if (value >= 'a' and value <= 'z') value - ('a' - 'A') else value;
 }
 
 fn contains(haystack: []const u8, needle: []const u8) bool {
