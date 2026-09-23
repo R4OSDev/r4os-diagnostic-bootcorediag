@@ -7,6 +7,10 @@ BOOTDIAG trennt passive Bootmessung und invasive Vertragspruefung:
   kleinen `ProgramBootPerformanceInfo`-Datensatz und die vorhandenen
   Bootphasen. Dieser Pfad reserviert, committed, beruehrt und alloziert keinen
   Testspeicher und ruft weder Yield noch Sleep auf.
+- `BOOTDIAG /BOOTLOG` prueft gezielt den Bootlog sowie grosse und kleine
+  Reads in unberuehrte, nur logisch committete VM-Seiten. Leere und ausserhalb
+  des Puffers liegende Reads muessen null Bytes liefern. Derselbe Fall laeuft
+  auch in `/CONFORMANCE`; kein neuer regulaerer Testlauf.
 - `BOOTDIAG /CONFORMANCE` fuehrt die bisherigen breiten Runtimeprobes
   ausdruecklich aus. Zusaetzlich prueft es den abgewiesenen Readiness-Aufruf
   eines Nicht-Shell-Programms sowie bytegleiche Boot- und Phasendaten nach

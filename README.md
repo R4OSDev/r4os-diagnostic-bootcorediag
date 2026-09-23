@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.3.1`
+- Version: `0.3.2`
 - Image target: `/R4OS/SOFTWARE/TERMINAL/DIAG/BOOTDIAG.R4X`
 - Image scope: `test`
 - Canonical project manifest: `module.R4MF`
@@ -33,6 +33,10 @@ state-changing runtime contract tests and verifies that the completed boot
 dataset remains byte-stable across delayed reads. It also verifies that the
 one-shot `kernel-main` boot task is absent from the runtime task inventory (or
 remains dead and numerically unchanged until its deferred reap completes).
+
+`/BOOTLOG` runs just the bounded bootlog checks, including full and small
+reads into untouched lazy VM pages and empty/out-of-range reads. The same
+case is part of `/CONFORMANCE`; it adds no recurring test runner.
 
 ## Documentation
 

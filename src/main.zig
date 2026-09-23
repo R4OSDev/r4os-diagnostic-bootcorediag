@@ -17,6 +17,7 @@ const App = struct {
     fn run(self: *App) i32 {
         const args = zSpan(self.sys.argsRaw());
         if (equalsIgnoreCase(args, "/?") or equalsIgnoreCase(args, "--HELP")) return self.printHelp();
+        if (equalsIgnoreCase(args, "/BOOTLOG")) return if (self.testBootLogBridge()) 0 else 1;
         if (equalsIgnoreCase(args, "/CONFORMANCE") or equalsIgnoreCase(args, "--CONFORMANCE"))
             return self.runConformance();
         if (args.len == 0 or equalsIgnoreCase(args, "/BASELINE") or equalsIgnoreCase(args, "--BASELINE"))
@@ -77,6 +78,7 @@ const App = struct {
 
     fn printHelp(self: *App) i32 {
         self.sys.println("BOOTDIAG /BASELINE     passive boot dataset only (default)");
+        self.sys.println("BOOTDIAG /BOOTLOG      bounded bootlog and untouched VM buffer checks");
         self.sys.println("BOOTDIAG /CONFORMANCE  explicit invasive runtime contract checks");
         return 0;
     }
@@ -404,6 +406,21 @@ const App = struct {
         const event_ok = driver_ok and protocol_ok;
         self.printCheck("R4D/R4P log events", event_ok);
         if (!event_ok) return false;
+
+        // A fresh VM reservation deliberately has no touched payload pages.
+        // Bootlog API copies must release kernel owners before faulting them in.
+        const lazy = self.sys.vmReserve(2 * r4os.abi.boot_log_buffer_size, 4096, r4os.abi.vm_region_flags_default) orelse return self.failBool("BootLog lazy reserve");
+        defer _ = self.sys.vmRelease(lazy.id);
+        if (self.sys.vmCommit(lazy.id, 0, 2 * r4os.abi.boot_log_buffer_size) != r4os.abi.vm_ok) return self.failBool("BootLog lazy commit");
+        const bytes: [*]u8 = @ptrFromInt(lazy.base);
+        const full = self.sys.bootLogRead(0, bytes[0..read_len]);
+        const short_len = @min(read_len, 2048);
+        const short = self.sys.bootLogRead(0, bytes[r4os.abi.boot_log_buffer_size..][0..short_len]);
+        const lazy_ok = full == got and short == short_len and
+            self.sys.bootLogRead(info.capacity, bytes[0..1]) == 0 and
+            self.sys.bootLogRead(0, bytes[0..0]) == 0;
+        self.printCheck("BootLog untouched VM buffers", lazy_ok);
+        if (!lazy_ok) return false;
 
         self.sys.write("  BootLog bytes=");
         self.sys.printU64(info.length);
